@@ -10,22 +10,55 @@ import datetime
 import aiocron
 import re
 
+DB_VERSION = '0.1'
+
 bot = Bot(os.environ["API_TOKEN"])
 
 urls = {}
 
 def save_urls():
     with open('urls.json', 'w') as f:
-        f.write(json.dumps(urls) + '\n')
+        f.write(json.dumps({ 'db': { 'version': '0.1' }, 'urls': urls }) + '\n')
+
+def upgrade_db():
+    obj = None
+    with open('urls.json', 'r') as f:
+        s = f.read()
+        obj = json.loads(s)
+
+    try:
+        print(obj['db']['version'])
+        if obj['db']['version'] == DB_VERSION:
+            return False
+    except:
+        pass
+
+    if 'db' not in obj and 'urls' not in obj and list(obj)[0].isdigit():
+        # Upgrade 0.0 to 0.1
+        db = { 'db': { 'version': '0.1' }, 'urls': obj }
+        obj = db
+        upgraded = True
+
+    if not obj['db']['version'] == '0.1':
+        raise Exception('error upgrading db')
+
+    with open('urls.json', 'w') as f:
+        s = json.dumps(obj)
+        f.write(s)
+    return True
 
 def load_urls():
     try:
+        if upgrade_db():
+            print('upgraded database to %s' % DB_VERSION)
+
         with open('urls.json', 'r') as f:
             s = f.read()
             global urls
-            urls = json.loads(s)
-    except FileNotFoundError as e:
-        pass
+            urls = json.loads(s)['urls']
+    except Exception as e:
+        print('couldn\'t load database: %s' % e)
+        return
 
 @bot.command(r'/start')
 def start(chat, match):
