@@ -8,6 +8,7 @@ import threading
 import asyncio
 import datetime
 import aiocron
+import re
 
 bot = Bot(os.environ["API_TOKEN"])
 
@@ -46,6 +47,16 @@ def add_url(chat, match):
 
     if not urllib.parse.urlparse(url).scheme:
         url = 'http://' + url
+
+    regex = re.compile(
+        r'^(?:http|ftp)s?://' # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|' #domain...
+        r'localhost|' #localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})' # ...or ip
+        r'(?::\d+)?' # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    if not regex.match(url):
+        return chat.send_text('That URL is invalid!')
 
     if url in urls[id]:
         return chat.send_text('I\'m already tracking that URL!')
