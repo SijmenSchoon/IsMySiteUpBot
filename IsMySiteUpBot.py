@@ -10,15 +10,14 @@ import datetime
 import aiocron
 import re
 
-DB_VERSION = '0.1'
+DB_VERSION = '0.2'
 
 bot = Bot(os.environ["API_TOKEN"])
 
-urls = {}
-
 def save_urls():
+    dump = json.dumps(db)
     with open('urls.json', 'w') as f:
-        f.write(json.dumps({ 'db': { 'version': '0.1' }, 'urls': urls }) + '\n')
+        f.write(dump)
 
 def upgrade_db():
     obj = None
@@ -37,10 +36,18 @@ def upgrade_db():
         # Upgrade 0.0 to 0.1
         db = { 'db': { 'version': '0.1' }, 'urls': obj }
         obj = db
-        upgraded = True
 
-    if not obj['db']['version'] == '0.1':
-        raise Exception('error upgrading db')
+    if obj['db']['version'] == '0.1':
+        db = { 'db': { 'version': '0.2' }, 'users': {} }
+        # Upgrade 0.1 to 0.2
+        for user in obj['urls']:
+            db['users'][user] = {}
+            for url in obj['urls'][user]:
+                db['users'][user][url] = { 'total': { 'tests': 0, 'tests_up': 0, 'tests_up_spree': 0 }, 'by_day': {} }
+        obj = db
+
+    if not obj['db']['version'] == DB_VERSION:
+        raise Exception('db version not updated')
 
     with open('urls.json', 'w') as f:
         s = json.dumps(obj)
@@ -51,17 +58,20 @@ def load_urls():
     try:
         if upgrade_db():
             print('upgraded database to %s' % DB_VERSION)
+    except Exception as e:
+        print('couldn\'t upgrade database: %s' % e)
 
+    try:
         with open('urls.json', 'r') as f:
-            s = f.read()
-            global urls
-            urls = json.loads(s)['urls']
+            global db
+            db = json.loads(f.read())
     except Exception as e:
         print('couldn\'t load database: %s' % e)
         return
 
 @bot.command(r'/start')
 def start(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
     return chat.send_text('''
 Hi there! I'm here for checking if your sites are up.
 Every hour, I'll try loading your URLs, and if I don't succeed, I'll tell you.
@@ -73,10 +83,11 @@ If you want to trigger a test manually, send /test_urls!
 
 @bot.command(r'/add_url (.+)')
 def add_url(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
     url = match.group(1)
     id = str(chat.id)
-    if id not in urls:
-        urls[id] = []
+    if id not in db['users']:
+        db['users'][id] = {}
 
     if not urllib.parse.urlparse(url).scheme:
         url = 'http://' + url
@@ -91,22 +102,22 @@ def add_url(chat, match):
     if not regex.match(url):
         return chat.send_text('That URL is invalid!')
 
-    if url in urls[id]:
+    if url in db['users'][id]:
         return chat.send_text('I\'m already tracking that URL!')
 
-    if len(urls[id]) > 4:
+    if len(db['users'][id]) > 4:
         return chat.send_text('You can only make me track 5 URLs at maximum. Please remove an URL to add a new one (see /help).')
 
-    urls[id].append(url)
-    #save_urls()
+    db['users'][id][url] = { 'total': { 'tests': 0, 'tests_up': 0, 'tests_up_spree': 0 }, 'by_day': {} }
 
-    print('%s added the url %s' % (chat.sender, url))
     return chat.send_text('Added the URL %s!' % url, disable_web_page_preview=True)
 
 def test(url):
     try:
         resp = requests.head(url, allow_redirects=True)
-        return resp.status_code
+        if not resp.ok:
+            resp = requests.get(url, allow_redirects=True)
+        return resp
     except requests.exceptions.ConnectionError as e:
         return 'connection error'
     except Exception as e:
@@ -114,18 +125,20 @@ def test(url):
 
 @bot.command(r'/test_urls')
 async def test_urls(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
     id = str(chat.id)
     broken_urls = []
 
-    print('%s requested a test of his URLs' % chat.sender)
-
     msg_id = (await chat.send_text('Testing...'))['result']['message_id']
-    for i in range(len(urls[id])):
-        url = urls[id][i]
-        await chat.edit_text(msg_id, 'Testing... (%.0f%%)' % ((i) / len(urls[id]) * 100))
+
+    count = len(db['users'][id])
+    curr = 0
+    for url in db['users'][id]:
+        await chat.edit_text(msg_id, 'Testing... (%.0f%%)' % (curr / count * 100))
         resp = test(url)
-        if resp != 200:
-            broken_urls.append((url, resp))
+        if not resp.ok:
+            broken_urls.append((url, resp.status_code, resp.reason))
+        curr += 1
     await chat.edit_text(msg_id, 'Testing... (100%)')
 
     if len(broken_urls) > 0:
@@ -133,45 +146,29 @@ async def test_urls(chat, match):
         msg += 'This URL doesn\'t work:\n' if len(broken_urls) == 1 else 'These URLs don\'t work:\n'
 
         for tup in broken_urls:
-            msg += ' - %s (%s)\n' % tup
+            msg += ' - %s (%d %s)\n' % tup
         await chat.send_text(msg, disable_web_page_preview=True)
     else:
         await chat.send_text('Everything went a-ok!')
 
 @bot.command(r'/urls')
 def send_urls(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
     id = str(chat.id)
-    if id not in urls or len(urls[id]) == 0:
+    if id not in db['users'] or len(db['users'][id]) == 0:
         return chat.send_text('I\'m currently not tracking any URLs for you. Use /add_url <url> to add one.')
 
     msg = 'I\'m tracking the following URLs for you:\n'
-    for i in range(len(urls[id])):
-        url = urls[id][i]
-        msg += ' - %s (/del_%d, /test_%d)\n' % (url, i, i)
+    for url in db['users'][id]:
+        msg += ' - %s\n' % url
     return chat.send_text(msg, disable_web_page_preview=True)
-
-@bot.command(r'/del_(.+)')
-def del_url_id(chat, match):
-    id = str(chat.id)
-    try:
-        url = urls[id][int(match.group(1))]
-        del urls[id][int(match.group(1))]
-        #save_urls()
-        return chat.send_text('Deleted %s' % url)
-    except IndexError:
-        pass
-
-@bot.command(r'/test_(.+)')
-def test_url_id(chat, match):
-    id = str(chat.id)
-    url = urls[id][int(match.group(1))]
-    return chat.send_text('Got a %s!' % test(url))
 
 @bot.command(r'/stop')
 def stop(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
     id = str(chat.id)
     try:
-        del urls[id]
+        del db['users'][id]
     except IndexError:
         pass
     return chat.send_text('Okay, deleted all your data. See you!')
@@ -180,27 +177,31 @@ async def hourly_test():
     while True:
         await aiocron.crontab('*/15 * * * *').next()
         print(datetime.datetime.now())
-        for id in urls:
+        for id in db['users']:
             broken_urls = []
-            for url in urls[id]:
+            for url in db['users'][id]:
                 resp = test(url)
-                if resp != 200:
-                    broken_urls.append((url, resp))
+
+                db['users'][id][url]['total']['tests'] += 1
+                if not resp.ok:
+                    broken_urls.append((url, resp.status_code, resp.reason))
+                    db['users'][id][url]['total']['tests_up_spree'] = 0
+                else:
+                    db['users'][id][url]['total']['tests_up'] += 1
+                    db['users'][id][url]['total']['tests_up_spree'] += 1
 
             if len(broken_urls) > 0:
                 msg = 'Houston, we\'ve had a problem. '
                 msg += 'This URL doesn\'t work:\n' if len(broken_urls) == 1 else 'These URLs don\'t work:\n'
                 for tup in broken_urls:
-                    msg += ' - %s (%s)\n' % tup
+                    msg += ' - %s (%d %s)\n' % tup
                 await bot.send_message(id, msg, disable_web_page_preview=True)
                 print('Something went wrong for %s' % id)
 
 async def save_loop():
     while True:
         await aiocron.crontab('* * * * *').next()
-        print('Saving...')
         save_urls()
-        print('Done.')
 
 if __name__ == '__main__':
     load_urls()
