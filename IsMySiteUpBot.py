@@ -161,11 +161,11 @@ def del_url_param(chat, match):
 
         del(db['users'][id][match.group(1)])
         if url['total']['tests'] == 0:
-            return chat.send_text('Successfully removed %s.' % match.group(1))
+            return chat.send_text('Successfully removed %s.' % match.group(1), disable_web_page_preview=True)
         else:
             uptime = url['total']['tests_up_spree'] * 0.25
             reliability = url['total']['tests_up'] / url['total']['tests']
-            return chat.send_text('Successfully removed %s. Its highest recorded uptime was %d hours and its reliability was %.0f%%.' % (match.group(1), uptime, reliability * 100))
+            return chat.send_text('Successfully removed %s. Its highest recorded uptime was %d hours and its reliability was %.0f%%.' % (match.group(1), uptime, reliability * 100), disable_web_page_preview=True)
 
     except KeyError:
         return chat.send_text('I\'m not tracking that URL at the moment! Make sure you\'re entering the entire URL!')
