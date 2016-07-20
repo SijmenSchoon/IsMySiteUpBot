@@ -151,6 +151,26 @@ async def test_urls(chat, match):
     else:
         await chat.send_text('Everything went a-ok!')
 
+@bot.command(r'/del_url (.+)')
+def del_url(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
+    id = str(chat.id)
+
+    try:
+        url = db['users'][id][match.group(1)]
+
+        del(db['users'][id][match.group(1)])
+        if url['total']['tests'] == 0:
+            return chat.send_text('Successfully removed %s.' % match.group(1))
+        else:
+            uptime = url['total']['tests_up_spree'] * 0.25
+            reliability = url['total']['tests_up'] / url['total']['tests']
+            return chat.send_text('Successfully removed %s. Its highest recorded uptime was %d hours and its reliability was %.0f%%.' % (match.group(1), uptime, reliability * 100))
+
+
+    except IndexError:
+        return chat.send_text('I\'m not tracking that URL at the moment! Make sure you\'re entering the entire URL!')
+
 @bot.command(r'/urls')
 def send_urls(chat, match):
     print('%s: %s' % (chat.sender, match.string))
