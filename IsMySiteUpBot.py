@@ -152,7 +152,7 @@ async def test_urls(chat, match):
         await chat.send_text('Everything went a-ok!')
 
 @bot.command(r'/del_url (.+)')
-def del_url(chat, match):
+def del_url_param(chat, match):
     print('%s: %s' % (chat.sender, match.string))
     id = str(chat.id)
 
@@ -167,9 +167,25 @@ def del_url(chat, match):
             reliability = url['total']['tests_up'] / url['total']['tests']
             return chat.send_text('Successfully removed %s. Its highest recorded uptime was %d hours and its reliability was %.0f%%.' % (match.group(1), uptime, reliability * 100))
 
-
-    except IndexError:
+    except KeyError:
         return chat.send_text('I\'m not tracking that URL at the moment! Make sure you\'re entering the entire URL!')
+
+@bot.command(r'/del_url')
+def del_url(chat, match):
+    print('%s: %s' % (chat.sender, match.string))
+    id = str(chat.id)
+
+    try:
+        keyboard = { 'inline_keyboard': [] }
+        for url in db['users'][id]:
+            keyboard['inline_keyboard'].append([ {
+                    'text': url,
+                    'callback_data': json.dumps({ 'action': 'del_url', 'url': url })
+                } ])
+    except KeyError:
+        return chat.send_text('I\'m currently not tracking any URLs for you. Use /add_url <url> to add one.')
+
+    return chat.send_text('Select an URL to delete:', reply_markup=json.dumps(keyboard))
 
 @bot.command(r'/urls')
 def send_urls(chat, match):
@@ -192,6 +208,34 @@ def stop(chat, match):
     except IndexError:
         pass
     return chat.send_text('Okay, deleted all your data. See you!')
+
+@bot.callback
+async def callback(chat, cq):
+    print('%s: callback: %s' % (chat.sender, cq.data))
+
+    obj = {}
+    try:
+        obj = json.loads(cq.data)
+    except Exception as e:
+        print('error processing callback: %s' % e)
+
+    try:
+        action = obj['action']
+        if action == 'del_url':
+            keyboard = { 'inline_keyboard': [] }
+
+            await del_url_param(chat, re.match('(.+)', obj['url']))
+            for url in db['users'][str(chat.id)]:
+                keyboard['inline_keyboard'].append([ {
+                        'text': url,
+                        'callback_data': json.dumps({ 'action': 'del_url', 'url': url })
+                    } ])
+
+                await chat.edit_text(chat.message['message_id'], 'Select an URL to delete:', markup=keyboard)
+
+            await cq.answer()
+    except KeyError as e:
+        print('error processing callback: %r' % e)
 
 async def hourly_test():
     while True:
