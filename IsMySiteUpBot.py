@@ -74,7 +74,7 @@ def start(chat, match):
     print('%s: %s' % (chat.sender, match.string))
     return chat.send_text('''
 Hi there! I'm here for checking if your sites are up.
-Every hour, I'll try loading your URLs, and if I don't succeed, I'll tell you.
+Every fifteen minutes, I'll try loading your URLs, and if I don't succeed, I'll tell you.
 
 To get started, add an url using /add_url <url>. If you want to list your URLs, send /urls.
 
