@@ -1,0 +1,4 @@
+aiotg
+requests
+asyncio
+aiocron
